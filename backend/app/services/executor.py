@@ -1,18 +1,15 @@
 import sys
 import io
 import time
-import signal
+import threading
 from contextlib import redirect_stdout, redirect_stderr
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Dict, Any, Optional, Tuple
 from ..core.config import settings
 
 
-class TimeoutError(Exception):
+class CodeTimeoutError(Exception):
     pass
-
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("Code execution timed out")
 
 
 class SafePythonExecutor:
@@ -23,11 +20,15 @@ class SafePythonExecutor:
         'enumerate', 'filter', 'float', 'format', 'frozenset', 'hex',
         'int', 'len', 'list', 'map', 'max', 'min', 'oct', 'ord', 'pow',
         'range', 'reversed', 'round', 'set', 'sorted', 'str', 'sum',
-        'tuple', 'type', 'zip'
+        'tuple', 'type', 'zip', '__import__', 'print', 'locals', 'globals',
+        'callable', '__build_class__',
+        # Exception types
+        'Exception', 'ValueError', 'TypeError', 'IndexError', 'KeyError',
+        'AttributeError', 'RuntimeError', 'ZeroDivisionError', 'NameError'
     }
     
     ALLOWED_MODULES = {
-        'math', 'statistics', 'random', 'datetime', 'json'
+        'math', 'statistics', 'random', 'datetime', 'json', 'numpy', 'pandas'
     }
     
     def __init__(self):
@@ -35,6 +36,16 @@ class SafePythonExecutor:
             name: builtin for name, builtin in __builtins__.items()
             if name in self.ALLOWED_BUILTINS
         }
+    
+    def _execute_code_worker(self, code: str, safe_globals: dict) -> Tuple[str, str]:
+        """Worker function to execute code in a separate thread"""
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            exec(code, safe_globals)
+        
+        return stdout_capture.getvalue(), stderr_capture.getvalue()
     
     def execute_code(self, code: str, args: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str], float]:
         """
@@ -60,10 +71,10 @@ class SafePythonExecutor:
                 pass
         
         # Parse arguments if provided
+        parsed_args = []
         if args:
             try:
                 # Simple argument parsing - expect comma-separated values
-                parsed_args = []
                 for arg in args.split(','):
                     arg = arg.strip()
                     if arg.isdigit():
@@ -75,39 +86,35 @@ class SafePythonExecutor:
                 safe_globals['args'] = parsed_args
             except Exception as e:
                 return False, None, f"Error parsing arguments: {str(e)}", 0.0
-        
-        # Capture output
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
+        else:
+            safe_globals['args'] = []
         
         start_time = time.time()
         
         try:
-            # Set timeout
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(settings.code_execution_timeout)
-            
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                exec(code, safe_globals)
-            
-            execution_time = time.time() - start_time
-            
-            # Get output
-            stdout_result = stdout_capture.getvalue()
-            stderr_result = stderr_capture.getvalue()
-            
-            if stderr_result:
-                return False, None, stderr_result, execution_time
-            
-            return True, stdout_result or "Code executed successfully", None, execution_time
-            
-        except TimeoutError:
-            return False, None, f"Code execution timed out after {settings.code_execution_timeout} seconds", time.time() - start_time
+            # Use ThreadPoolExecutor for timeout handling
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                # Add code to call main function if it exists
+                enhanced_code = code + "\n\n# Auto-execute main function if it exists\ntry:\n    if 'main' in globals() and callable(main):\n        main(*args)\nexcept NameError:\n    pass\n"
+                
+                future = executor.submit(self._execute_code_worker, enhanced_code, safe_globals)
+                
+                try:
+                    stdout_result, stderr_result = future.result(timeout=settings.code_execution_timeout)
+                    execution_time = time.time() - start_time
+                    
+                    if stderr_result:
+                        return False, None, stderr_result, execution_time
+                    
+                    return True, stdout_result or "Code executed successfully", None, execution_time
+                    
+                except FutureTimeoutError:
+                    execution_time = time.time() - start_time
+                    return False, None, f"Code execution timed out after {settings.code_execution_timeout} seconds", execution_time
+                    
         except Exception as e:
             execution_time = time.time() - start_time
             return False, None, str(e), execution_time
-        finally:
-            signal.alarm(0)  # Cancel the alarm
 
 
 # Global executor instance

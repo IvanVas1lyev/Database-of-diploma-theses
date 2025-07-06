@@ -1,100 +1,92 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+"""
+API endpoints для работы со студентами (файловая система)
+"""
+
 from typing import List, Optional
-from ...core.database import get_db
-from ...schemas.thesis import Student, StudentCreate, StudentUpdate, SearchResponse
-from ...services.student_service import StudentService
-import math
+from fastapi import APIRouter, HTTPException, Query
+from app.services.file_service import FileStudentService
 
 router = APIRouter()
+file_service = FileStudentService()
 
-
-@router.post("/", response_model=Student)
-def create_student(
-    student: StudentCreate,
-    db: Session = Depends(get_db)
+@router.get("/students")
+async def get_students(
+    year: Optional[int] = Query(None, description="Фильтр по году выпуска"),
+    search: Optional[str] = Query(None, description="Поисковый запрос")
 ):
-    """Create a new student"""
-    return StudentService.create_student(db=db, student=student)
+    """
+    Получение списка студентов с возможностью фильтрации и поиска
+    """
+    try:
+        if search:
+            students = file_service.search_students(search)
+        elif year:
+            students = file_service.get_students_by_year(year)
+        else:
+            students = file_service.get_all_students()
+        
+        return {
+            "students": students,
+            "total": len(students)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {str(e)}")
 
-
-@router.get("/", response_model=List[Student])
-def read_students(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
-):
-    """Get all students with pagination"""
-    return StudentService.get_students(db=db, skip=skip, limit=limit)
-
-
-@router.get("/search", response_model=SearchResponse)
-def search_students(
-    q: Optional[str] = Query(None, description="Search query for name, title, or summary"),
-    year: Optional[int] = Query(None, description="Filter by graduation year"),
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: Session = Depends(get_db)
-):
-    """Search students by query and/or year"""
-    students, total = StudentService.search_students(
-        db=db, query=q, year=year, page=page, per_page=per_page
-    )
+@router.get("/students/{student_id}")
+async def get_student(student_id: str):
+    """
+    Получение информации о конкретном студенте
+    """
+    student = file_service.get_student_by_id(student_id)
     
-    total_pages = math.ceil(total / per_page) if total > 0 else 1
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
     
-    return SearchResponse(
-        students=students,
-        total=total,
-        page=page,
-        per_page=per_page,
-        total_pages=total_pages
-    )
-
-
-@router.get("/years", response_model=List[int])
-def get_graduation_years(db: Session = Depends(get_db)):
-    """Get all unique graduation years"""
-    return StudentService.get_graduation_years(db=db)
-
-
-@router.get("/years/{year}", response_model=List[Student])
-def get_students_by_year(
-    year: int,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
-):
-    """Get students by graduation year"""
-    return StudentService.get_students_by_year(db=db, year=year, skip=skip, limit=limit)
-
-
-@router.get("/{student_id}", response_model=Student)
-def read_student(student_id: int, db: Session = Depends(get_db)):
-    """Get student by ID"""
-    student = StudentService.get_student(db=db, student_id=student_id)
-    if student is None:
-        raise HTTPException(status_code=404, detail="Student not found")
     return student
 
+@router.get("/students/{student_id}/code/{filename}")
+async def get_student_code_file(student_id: str, filename: str):
+    """
+    Получение файла кода студента
+    """
+    content = file_service.get_student_code_file(student_id, filename)
+    
+    if content is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    
+    return {
+        "filename": filename,
+        "content": content
+    }
 
-@router.put("/{student_id}", response_model=Student)
-def update_student(
-    student_id: int,
-    student_update: StudentUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update student information"""
-    student = StudentService.update_student(db=db, student_id=student_id, student_update=student_update)
-    if student is None:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return student
+@router.get("/years")
+async def get_available_years():
+    """
+    Получение списка доступных годов выпуска
+    """
+    years = file_service.get_available_years()
+    return {"years": years}
 
+@router.get("/statistics")
+async def get_statistics():
+    """
+    Получение статистики по базе данных
+    """
+    stats = file_service.get_statistics()
+    return stats
 
-@router.delete("/{student_id}")
-def delete_student(student_id: int, db: Session = Depends(get_db)):
-    """Delete student"""
-    success = StudentService.delete_student(db=db, student_id=student_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return {"message": "Student deleted successfully"}
+@router.get("/health")
+async def health_check():
+    """
+    Проверка работоспособности API
+    """
+    try:
+        # Проверяем доступность файловой системы
+        stats = file_service.get_statistics()
+        return {
+            "status": "healthy",
+            "data_available": stats["total_students"] > 0,
+            "total_students": stats["total_students"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Сервис недоступен: {str(e)}")

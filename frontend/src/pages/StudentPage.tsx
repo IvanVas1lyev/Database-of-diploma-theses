@@ -10,6 +10,9 @@ const StudentPage: React.FC = () => {
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [codeInfo, setCodeInfo] = useState<any>(null);
+  const [codeContent, setCodeContent] = useState<string>('');
+  const [loadingCode, setLoadingCode] = useState(false);
 
   useEffect(() => {
     const loadStudent = async () => {
@@ -20,8 +23,13 @@ const StudentPage: React.FC = () => {
       }
 
       try {
-        const studentData = await studentApi.getStudent(parseInt(id));
+        const studentData = await studentApi.getStudent(id);
         setStudent(studentData);
+        
+        // Load code information if student has code
+        if (studentData.code?.has_code) {
+          await loadCodeInfo(id);
+        }
       } catch (error) {
         console.error('Failed to load student:', error);
         setError('Failed to load student information');
@@ -32,6 +40,24 @@ const StudentPage: React.FC = () => {
 
     loadStudent();
   }, [id]);
+
+  const loadCodeInfo = async (studentId: string) => {
+    try {
+      setLoadingCode(true);
+      const info = await studentApi.getStudentCodeInfo(studentId);
+      setCodeInfo(info);
+      
+      // Load the main code file content
+      if (info.has_code && info.main_file) {
+        const codeResponse = await studentApi.getStudentCodeFile(studentId, info.main_file);
+        setCodeContent(codeResponse.content || codeResponse);
+      }
+    } catch (error) {
+      console.error('Failed to load code info:', error);
+    } finally {
+      setLoadingCode(false);
+    }
+  };
 
   const handleExecuteCode = async (args?: string): Promise<ExecutionResult> => {
     if (!student) {
@@ -101,22 +127,38 @@ const StudentPage: React.FC = () => {
               <div className="space-y-4">
                 <div>
                   <h3 className="text-lg font-medium text-gray-800 mb-2">Название</h3>
-                  <p className="text-gray-700">{student.thesis_title}</p>
+                  <p className="text-gray-700">{student.thesis?.title || student.thesis_title}</p>
                 </div>
                 
                 <div>
                   <h3 className="text-lg font-medium text-gray-800 mb-2">Аннотация</h3>
-                  <p className="text-gray-700 leading-relaxed">{student.thesis_summary}</p>
+                  <p className="text-gray-700 leading-relaxed">{student.thesis?.summary || student.thesis_summary}</p>
                 </div>
               </div>
             </div>
 
             {/* Code Execution */}
-            {student.python_code && (
-              <CodeExecutor
-                code={student.python_code}
-                onExecute={handleExecuteCode}
-              />
+            {codeInfo?.has_code && codeContent && (
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h2 className="text-2xl font-semibold text-gray-900 mb-4">Интерактивный код</h2>
+                {codeInfo.description && (
+                  <p className="text-gray-600 mb-4">{codeInfo.description}</p>
+                )}
+                <CodeExecutor
+                  code={codeContent}
+                  onExecute={handleExecuteCode}
+                />
+              </div>
+            )}
+            
+            {/* Loading Code */}
+            {loadingCode && (
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="mt-2 text-gray-600">Загрузка кода...</p>
+                </div>
+              </div>
             )}
           </div>
 
@@ -140,11 +182,11 @@ const StudentPage: React.FC = () => {
                 <div>
                   <span className="text-sm font-medium text-gray-500">Добавлено в базу</span>
                   <p className="text-gray-900">
-                    {new Date(student.created_at).toLocaleDateString('ru-RU')}
+                    {new Date(student.added_date || student.created_at || '').toLocaleDateString('ru-RU')}
                   </p>
                 </div>
                 
-                {student.python_code && (
+                {(student.code?.has_code || student.python_code) && (
                   <div>
                     <span className="text-sm font-medium text-gray-500">Интерактивный код</span>
                     <p className="text-green-600 font-medium">Доступен</p>

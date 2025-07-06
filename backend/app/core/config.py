@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     backend_cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     
     # Python execution
-    code_execution_timeout: int = 5
-    max_code_length: int = 1000
+    code_execution_timeout: int = 10
+    max_code_length: int = 10000
     
     class Config:
         env_file = ".env"

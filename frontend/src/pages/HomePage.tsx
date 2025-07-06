@@ -18,7 +18,7 @@ const HomePage: React.FC = () => {
       try {
         const [years, students] = await Promise.all([
           studentApi.getGraduationYears(),
-          studentApi.getStudents(0, 6) // Get 6 most recent students
+          studentApi.getStudents() // Get all students
         ]);
         setGraduationYears(years);
         setRecentStudents(students);
@@ -38,7 +38,7 @@ const HomePage: React.FC = () => {
 
     setLoading(true);
     try {
-      const results = await studentApi.searchStudents(query, year, 1, 20);
+      const results = await studentApi.searchStudents(query, year);
       setSearchResults(results);
     } catch (error) {
       console.error('Search failed:', error);
@@ -54,7 +54,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  const handleStudentClick = (studentId: number) => {
+  const handleStudentClick = (studentId: string) => {
     navigate(`/student/${studentId}`);
   };
 

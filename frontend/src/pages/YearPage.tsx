@@ -33,7 +33,7 @@ const YearPage: React.FC = () => {
     loadStudents();
   }, [year]);
 
-  const handleStudentClick = (studentId: number) => {
+  const handleStudentClick = (studentId: string) => {
     navigate(`/student/${studentId}`);
   };
 
