@@ -293,3 +293,4 @@ This project is open source and available under the MIT License.
 - React team for the robust frontend library
 - PostgreSQL for reliable database functionality
 - Docker for containerization capabilities
+
